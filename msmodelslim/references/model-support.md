@@ -83,14 +83,15 @@ Complete list of models supported by msModelSlim.
 
 ## MoE (Mixture of Experts) Models
 
+msModelSlim supports MoE architecture models from various model families.
+
 | Model | One-Click | V0 Script | W8A8 | W4A8 | Dependencies |
 |-------|-----------|-----------|------|------|--------------|
 | **Qwen3-30B-A3B** | - | `example/Qwen3-MOE/` | ✓ | ✓ | transformers==4.51.0 |
 | **Qwen3-235B-A22B** | ✓ | `example/Qwen3-MOE/` | ✓ | ✓ | transformers==4.51.0 |
 | **Qwen3-Coder-480B-A35B** | ✓ | `example/Qwen3-MOE/` | - | ✓ | transformers==4.51.0 |
 | **Qwen3-Next-80B-A3B-Instruct** | ✓ | `example/Qwen3-Next/` | ✓ | - | transformers>=4.57.0 |
-| **DeepSeek-V2-16B** | - | `example/DeepSeek/` | ✓ | - | - |
-| **DeepSeek-V2-236B** | - | `example/DeepSeek/` | ✓ | - | - |
+| **DeepSeek MoE Series** | ✓ | `example/DeepSeek/` | ✓ | ✓ | transformers==4.48.2 |
 
 ---
 
