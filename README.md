@@ -13,6 +13,7 @@ A streamlined knowledge base for Huawei Ascend NPU development, structured as AI
 | [msmodelslim](msmodelslim/SKILL.md) | Ascend model compression tool: W4A8/W8A8/W8A8S quantization for LLM, MoE, multimodal models (Qwen, DeepSeek, GLM, Kimi), precision auto-tuning, custom model integration, vLLM-Ascend/MindIE deployment |
 | [vllm-ascend](vllm-ascend/SKILL.md) | vLLM inference engine for Ascend NPU: offline batch inference, OpenAI-compatible API server, quantized model serving (W4A8/W8A8), tensor/pipeline parallelism, distributed inference, performance optimization |
 | [ais-bench](ais-bench/SKILL.md) | AI model evaluation tool: accuracy evaluation (text, multimodal), performance evaluation (latency, throughput, stress testing), 15+ benchmarks (MMLU, GSM8K, MMMU, BFCL), multi-turn dialogue, Function Call |
+| [ascendc](ascendc/SKILL.md) | AscendC transformer operator development: FFN, GMM, MoE related operators implementation, including CANN API examples and best practices |
 
 ## Installation
 
@@ -23,11 +24,20 @@ You need `npx` installed. Download Node.js (includes npx) from:
 
 ### Install Skills
 
+#### Quick Install
 ```bash
 npx skills add ascend-ai-coding/awesome-ascend-skills
 ```
 
 This command will install all skills from this repository to your AI coding tool (Claude Code, OpenCode, Codex, Cursor, etc.)
+
+#### Install Manual
+
+```bash
+git clone https://github.com/ascend-ai-coding/awesome-ascend-skills.git
+cd awesome-ascend-skills
+npx skills add .
+```
 
 ## Structure
 
