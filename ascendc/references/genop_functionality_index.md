@@ -39,7 +39,7 @@ op_class/
 ### 3. Template Files
 
 The `genop` tool uses template files located at:
-- `/Users/wlf/Desktop/KernelCode/ops-transformer/scripts/opgen/template/add`
+- `<ops-transformer-root>/scripts/opgen/template/add`
 
 These templates provide the basic structure and boilerplate code for new operators.
 
@@ -71,11 +71,11 @@ These templates provide the basic structure and boilerplate code for new operato
 ## Related Files
 
 ### Core Files
-- `/Users/wlf/Desktop/KernelCode/ops-transformer/build.sh` - Main build script with genop functionality
-- `/Users/wlf/Desktop/KernelCode/ops-transformer/scripts/opgen/opgen_standalone.py` - Python script that generates the operator project
+- `<ops-transformer-root>/build.sh` - Main build script with genop functionality
+- `<ops-transformer-root>/scripts/opgen/opgen_standalone.py` - Python script that generates the operator project
 
 ### Check Script
-- `/Users/wlf/Desktop/KernelCode/awesome-ascend-skills/ascendc/scripts/check_genop.sh` - Script to verify genop functionality
+- `<skill-root>/scripts/check_genop.sh` - Script to verify genop functionality
 
 ## Examples
 
@@ -99,7 +99,7 @@ bash build.sh --genop=ffn/my_custom_ffn_op
 ### Common Issues
 
 1. **Template directory not found**:
-   - Ensure the template directory exists at `/Users/wlf/Desktop/KernelCode/ops-transformer/scripts/opgen/template/add`
+   - Ensure the template directory exists at `<ops-transformer-root>/scripts/opgen/template/add`
 
 2. **Permission denied**:
    - Make sure you have write permissions in the ops-transformer directory
@@ -125,3 +125,8 @@ bash build.sh --genop=ffn/my_custom_ffn_op
 ## Conclusion
 
 The `genop` functionality is an essential tool for efficiently creating new AscendC operator projects. By following the patterns and guidelines outlined in this document, you can quickly set up new operators and focus on implementing the core functionality rather than boilerplate code.
+
+## Path Placeholders
+
+- `<ops-transformer-root>`: Refers to the root directory of the `ops-transformer` project
+- `<skill-root>`: Refers to the root directory of the `awesome-ascend-skills/ascendc` directory
