@@ -75,6 +75,10 @@ Subsequent sections will detail what to do in each step and which details to pay
   - CANN API example: `ops-transformer/moe/moe_init_routing/examples/test_aclnn_moe_init_routing.cpp`
 - General CANN API Example Reference:
   - `ops-transformer/attention/softmax_ops/examples/test_aclnn_softmax_ops.cpp`
+- Type / Format Enum Reference (CANN):
+  - Data types: `enum DataType` in `graph/types.h` (e.g. lines 80–123) under CANN install path, such as
+    `/usr/local/Ascend/cann-8.5.0-beta.1/aarch64-linux/include/graph/types.h`
+  - Tensor formats: `enum Format` in the same `graph/types.h` (e.g. lines 189–247)
 
 ### Behavioral Guidelines
 
@@ -454,6 +458,72 @@ Although this skill example doesn't expand all files, the agent should follow th
    - Ensure:
      - Graph attributes/shapes correctly map to `tiling->...` fields accessed in kernel
      - Deterministic switches, workspace size, coreNum/parallNum calculation logic maintain consistent style
+
+### 4.1 使用 JSON + `graph/types.h` 驱动 op_host/op_kernel 对齐（通用流程）
+
+在很多自定义算子工程中，会存在一个用于描述算子接口的 JSON（例如 `moe_init_routing_grouped_matmul_grad.json`），其中列出每个输入/输出的:
+
+- name（张量名称）
+- param_type（required / optional）
+- type（如 `fp16` / `bf16` / `float` / `int32`）
+- format（如 `ND`）
+
+为了保证 `op_host` / `infershape` / `tiling` / `op_kernel` 一致，建议按如下通用步骤处理：
+
+1. **从 JSON 提取接口信息**
+   - 读取 JSON 中的:
+     - `input_desc[i].name` / `output_desc[j].name`
+     - `input_desc[i].type` / `output_desc[j].type`
+     - `input_desc[i].format` / `output_desc[j].format`
+   - 明确哪些张量是数据（`fp16`/`bf16`/`float` 等），哪些是索引/标量（`int32` 等）。
+
+2. **在 `op_host/*_def.cpp` 中映射 DataType / Format**
+   - DataType 必须使用 `ge::DataType` 枚举，参考 CANN 头文件:
+     - `ge::DT_FLOAT16`, `ge::DT_BF16`, `ge::DT_FLOAT`, `ge::DT_INT32`, ...
+       这些可以在 `graph/types.h` 的 `enum DataType` 中找到（如 \(L80\text{-}L123\)）。
+   - Format 必须使用 `ge::Format` 枚举，参考:
+     - `ge::FORMAT_ND`, `ge::FORMAT_NCHW`, `ge::FORMAT_NHWC`, ...
+       这些可以在 `graph/types.h` 的 `enum Format` 中找到（如 \(L189\text{-}L247\)）。
+   - 通用映射示例（JSON → C++）:
+     - `type: "fp16"` → `ge::DT_FLOAT16`
+     - `type: "bf16"` → `ge::DT_BF16`
+     - `type: "float"` → `ge::DT_FLOAT`
+     - `type: "int32"` → `ge::DT_INT32`
+     - `format: "ND"` → `ge::FORMAT_ND`
+   - 在 `Input("xxx")` / `Output("yyy")` 中：
+     - `.DataType({ ... })` 的内容严格来源于 JSON 中的 `type` 列表（按需求去重即可）。
+     - `.Format({ ... })` / `.UnknownShapeFormat({ ... })` 一般与 JSON 的 `format` 对齐（多数场景直接用 `FORMAT_ND`）。
+
+3. **在 infershape 中对齐 shape 关系**
+   - 使用 JSON 中的语义决定输出 shape 与哪个输入 shape 对齐，例如：
+     - 梯度算子中 `grad_x` 通常与其对应前向输入 `x` 同 shape；
+     - `grad_weight` 与 `weight` 同 shape。
+   - 在 `*_infershape.cpp` 中：
+     - 通过 `context->GetInputShape(index)` / `GetOutputShape(index)` 获取形状。
+     - 明确索引常量（如 `IDX_EXPANDED_X`, `IDX_WEIGHT`, `IDX_GRAD_X`, `IDX_GRAD_WEIGHT`），并保持与 JSON / `op_host` 输入输出顺序一致。
+     - 遍历维度拷贝：`SetDimNum` + `SetDim(i, ...)`，逻辑上保证“谁等于谁”与 JSON 的设计一致。
+
+4. **在 tiling 中使用 JSON + types.h 做一致性校验**
+   - 从 `TilingContext` 中获取某个关键输入（通常是主数据张量，如 `x` 或 `expanded_x`）的 shape 与 dtype：
+     - 使用 `context->GetInputShape(idx)->GetStorageShape()` 作为 tiling 参考 shape。
+     - 使用 `context->GetInputDesc(idx)->GetDataType()` 获取真实 dtype。
+   - 根据 JSON 中的 `type` 列表构造支持集合，例如：
+     - 若 JSON 仅包含 `["fp16","bf16","float"]`，则 tiling 中应只允许：
+       `const std::set<ge::DataType> supportedDtype = {ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT};`
+   - shape 维度约束（如必须是 4D）应与内核实现的假设一致：
+     - 检查 `GetDimNum()`，不符则返回 `GRAPH_FAILED` 并打印清晰错误。
+     - 将关键维度（如 N/C/H/W）记录到 tiling 结构，供 AscendC kernel 使用。
+
+5. **在 op_kernel 中保持命名与接口一致**
+   - tiling 结构体（如 `MoeInitRoutingGroupedMatmulGradTilingData`）的字段命名，应能从 JSON / 算子语义直接对应过来，例如 `totalLength`, `tileNum`。
+   - AscendC kernel 中的 GM tensor 命名（如 `gmExpandedX`, `gmWeight`, `gmGradY`, `gmGradX`, `gmGradWeight`）建议与 JSON 的 `name` 一致或做简单可读映射，避免 “x1/x2/y” 这种含义不清的名称。
+
+6. **通用注意事项**
+   - **不要手写随意的 DataType / Format 枚举值**，优先从 `graph/types.h` 中查找并复制，确保与当前 CANN 版本兼容。
+   - 当 JSON 中出现新类型（例如 `int8`、`bool`、`float8` 等）时：
+     - 先在 `graph/types.h` 中确认是否存在对应的 `ge::DT_*`；
+     - 确认算子语义与内核实现是否真的支持该类型，再加入 `DataType` 列表和 tiling 校验。
+   - 若 JSON 与现有 `op_host` / `infershape` / `tiling` 存在冲突，以**内核实现能力为上限**，在此基础上尽量向 JSON 靠拢，并在注释中标明差异原因。
 
 ---
 
