@@ -154,7 +154,7 @@ keywords:                            # 可选，推荐用于中文/双语 Skill
 #### 内容规范
 
 - **渐进式披露**：核心内容放在 SKILL.md（不超过 500 行），详细内容放在 `references/`
-- **代码块**：始终指定语言（```bash、```python、```yaml）
+- **代码块**：始终指定语言（```bash、python、yaml```）
 - **表格**：用于结构化参考数据（参数、命令对照）
 - **链接**：内部链接使用相对路径，确保可访问
 
@@ -244,30 +244,7 @@ skill-name/                          # 目录名：小写 + 连字符
 
 ### PR 模板
 
-提交 PR 时，请使用以下模板填写信息：
-
-```markdown
-## 变更类型
-- [ ] 新增 Skill
-- [ ] 改进现有 Skill
-- [ ] 修复错误
-- [ ] 文档更新
-
-## 变更描述
-简要描述本次变更的内容和原因。
-
-## 验证结果
-运行 `python3 scripts/validate_skills.py` 的结果：
-```
-✅ Validation PASSED!
-```
-
-## 检查清单
-- [ ] SKILL.md 格式正确
-- [ ] 已添加到 marketplace.json
-- [ ] 已更新 README.md
-- [ ] 无 TODO 占位符
-```
+提交 PR 时，请参考：```./guideline/.github/PULL_REQUEST_TEMPLATE.md```
 
 ### 审核流程
 
