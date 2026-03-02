@@ -4,6 +4,50 @@
 
 本文档提供 PyTorch NPU 运算的精度验证流程、标准和方法。
 
+## 验证前置条件
+
+### 1. 环境检查清单
+
+在执行精度验证前，必须确认以下环境配置正确：
+
+```bash
+# 1. 设置 CANN 环境
+source /usr/local/Ascend/nnae/set_env.sh
+# 或
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+
+# 2. 检查 CANN 版本
+cat /usr/local/Ascend/nnae/version.info 2>/dev/null || ls -la /usr/local/Ascend/nnae/
+
+# 3. 检查 torch 和 torch_npu 版本
+python3 -c "import torch; import torch_npu; print(f'PyTorch: {torch.__version__}'); print(f'torch_npu: {torch_npu.__version__}')"
+
+# 4. 验证 NPU 可用
+python3 -c "import torch; import torch_npu; print(f'NPU available: {torch.npu.is_available()}'); print(f'Device count: {torch.npu.device_count()}')"
+```
+
+### 2. 版本配套检查
+
+**重要**: torch_npu 版本必须与 CANN 版本配套，否则会出现算子执行失败。
+
+| torch_npu 版本 | CANN 版本 | PyTorch 版本 |
+|---------------|-----------|-------------|
+| 2.8.0 | 8.0.RCx / 8.2.RC1 | 2.8.0 |
+| 2.7.1 | 8.0.RC1 | 2.7.1 |
+| 2.6.0 | 7.0.0 | 2.6.0 |
+
+详细配套表参见：[version_compatibility.md](../installation/version_compatibility.md)
+
+### 3. 常见错误码参考
+
+| 错误码 | 含义 | 常见原因 | 解决方案 |
+|--------|------|----------|----------|
+| **561103** | 内核解析失败 | CANN/torch_npu 版本不配套 | 检查版本配套表，重新安装匹配版本 |
+| **561000** | 算子不存在 | NPU 缺少该算子实现 | 升级 CANN 或使用 op-plugin 扩展 |
+| **501000** | 内存不足 | 输入数据过大 | 减小 batch size 或输入维度 |
+| **501013** | 设备繁忙 | NPU 正在执行其他任务 | 等待或使用其他 NPU 设备 |
+
+
 ## 验证流程（5 步）
 
 ### 1. 准备验证环境
@@ -155,6 +199,36 @@ python3 -c "import torch; print(torch.__version__)"
 # 更新驱动和 PyTorch
 pip install --upgrade torch-npu
 ```
+### Q6: 所有算子执行失败，错误码 561103
+
+**原因：** CANN 和 torch_npu 版本不配套
+
+**诊断步骤：**
+```bash
+# 检查版本
+python3 -c "import torch; import torch_npu; print(f'torch: {torch.__version__}, torch_npu: {torch_npu.__version__}')"
+ls -la /usr/local/Ascend/nnae/
+```
+
+**解决方案：**
+1. 确认 torch_npu 版本与 CANN 版本配套（参见版本配套表）
+2. 重新安装正确版本的 torch_npu:
+   ```bash
+   pip uninstall torch-npu
+   pip install torch-npu==<compatible_version>
+   ```
+3. 如问题持续，联系华为技术支持
+
+### Q7: "Op does not has any binary" 错误
+
+**原因：** NPU 缺少对应算子的二进制实现
+
+**解决方案：**
+1. 检查 CANN 版本是否支持该算子
+2. 使用 op-plugin 扩展算子支持
+3. 升级到更新版本的 CANN
+
+
 
 ## 参考模板
 
