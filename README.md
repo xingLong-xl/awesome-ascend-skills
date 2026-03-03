@@ -88,7 +88,7 @@ cp -r awesome-ascend-skills/npu-smi your-project/.agents/skills/
 | [ais-bench](ais-bench/SKILL.md) | 测试 | AI 模型评估工具：精度评估（MMLU/GSM8K/MMMU 等 15+ 基准）、性能压测、Function Call |
 | [ascendc](ascendc/SKILL.md) | 开发 | AscendC 算子开发：FFN/GMM/MoE 等 Transformer 算子实现、CANN API 示例 |
 | [torch_npu](torch_npu/SKILL.md) | 开发 | PyTorch 昇腾扩展：环境检查、部署指引、PyTorch 迁移到 NPU 的完整指南 |
-| [diffusers-env-setup](diffusers-env-setup/SKILL.md) | 开发 | Diffusers 环境配置：CANN 版本检测、PyTorch + torch_npu 安装、Diffusers 安装验证 |
+| [diffusers-ascend](diffusers-ascend/SKILL.md) | 开发 | Diffusers 昇腾部署：环境配置、推理优化、模型量化（含子技能 env-setup） |
 
 ---
 

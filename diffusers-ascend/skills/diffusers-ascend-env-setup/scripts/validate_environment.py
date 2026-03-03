@@ -3,7 +3,7 @@
 
 import sys
 import os
-from importlib.metadata import version, PackageNotFoundError
+import re
 
 
 # Color codes
@@ -15,30 +15,33 @@ RESET = "\033[0m"
 
 def check_cann_installation():
     """Check CANN installation and detect version."""
+    version_pattern = re.compile(r"(\d+\.\d+\.\d+(\.\d+)?)")
+
     try:
-        # Check for CANN 8.5+ path: /usr/local/Ascend/cann
+        # Check for CANN 8.5+ path
         if os.path.exists("/usr/local/Ascend/cann"):
             cann_path = "/usr/local/Ascend/cann"
-            # Try to read version from version.txt if exists
-            version_file = os.path.join(cann_path, "version.txt")
-            if os.path.exists(version_file):
-                with open(version_file, "r") as f:
-                    version_line = f.readline().strip()
-                    version_parts = version_line.split()
-                    if len(version_parts) > 2:
-                        return True, f"CANN {version_parts[2]} (8.5+)"
+            for version_file in ["version.cfg", "version.txt"]:
+                version_path = os.path.join(cann_path, version_file)
+                if os.path.exists(version_path):
+                    with open(version_path, "r") as f:
+                        content = f.read()
+                        match = version_pattern.search(content)
+                        if match:
+                            return True, f"CANN {match.group(1)} (8.5+)"
             return True, "CANN 8.5+"
 
-        # Check for older path: /usr/local/Ascend/ascend-toolkit
+        # Check for older path
         elif os.path.exists("/usr/local/Ascend/ascend-toolkit"):
             cann_path = "/usr/local/Ascend/ascend-toolkit"
-            version_file = os.path.join(cann_path, "version.txt")
-            if os.path.exists(version_file):
-                with open(version_file, "r") as f:
-                    version_line = f.readline().strip()
-                    version_parts = version_line.split()
-                    if len(version_parts) > 2:
-                        return True, f"CANN {version_parts[2]} (before 8.5)"
+            for version_file in ["version.cfg", "version.txt"]:
+                version_path = os.path.join(cann_path, version_file)
+                if os.path.exists(version_path):
+                    with open(version_path, "r") as f:
+                        content = f.read()
+                        match = version_pattern.search(content)
+                        if match:
+                            return True, f"CANN {match.group(1)} (before 8.5)"
             return True, "CANN (before 8.5)"
 
         return False, "CANN not found"
@@ -72,7 +75,7 @@ def check_pytorch():
     try:
         import torch
 
-        return True, str(version("torch"))
+        return True, str(torch.__version__)
     except ImportError:
         return False, "PyTorch not installed"
     except Exception as e:
@@ -82,12 +85,10 @@ def check_pytorch():
 def check_torch_npu():
     """Check torch_npu installation."""
     try:
+        import torch
         import torch_npu
 
-        # Try to import torch first (required for torch_npu)
-        import torch
-
-        return True, str(version("torch_npu"))
+        return True, str(torch_npu.__version__)
     except ImportError:
         return False, "torch_npu not installed"
     except Exception as e:
@@ -119,7 +120,7 @@ def check_diffusers():
     try:
         import diffusers
 
-        return True, str(version("diffusers"))
+        return True, str(diffusers.__version__)
     except ImportError:
         return False, "diffusers not installed"
     except Exception as e:
@@ -131,8 +132,12 @@ def check_numpy_version():
     try:
         import numpy
 
-        numpy_version = version("numpy")
-        major_version = int(numpy_version.split(".")[0])
+        numpy_version = numpy.__version__
+
+        # Extract major version robustly
+        major_version = int(
+            numpy_version.split(".")[0].split("rc")[0].split("a")[0].split("b")[0]
+        )
 
         if major_version < 2:
             return True, f"{numpy_version} (< 2.0)"

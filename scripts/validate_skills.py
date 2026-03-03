@@ -51,16 +51,27 @@ def validate_skill_file(skill_path: Path) -> Tuple[List[str], List[str]]:
     actual_name = frontmatter.get("name", "")
 
     path_parts = skill_path.parts
-    is_npu_commands_subskill = (
-        "npu-commands" in path_parts and skill_path.parent.name not in ["npu-commands"]
-    )
 
-    if is_npu_commands_subskill:
-        if not actual_name.startswith("npu-smi-"):
-            warnings.append(
-                f"Skill name '{actual_name}' should start with 'npu-smi-' for consistency"
-            )
+    # Check if this is a nested skill (inside a 'skills/' directory, but not in .agents/)
+    is_nested_skill = "skills" in path_parts and ".agents" not in path_parts
+
+    if is_nested_skill:
+        # For nested skills, expected name format: {parent}-skillname
+        skills_index = path_parts.index("skills")
+        if skills_index > 0:
+            parent_name = path_parts[skills_index - 1]
+            skill_name = skill_path.parent.name
+            expected_nested_name = f"{parent_name}-{skill_name}"
+
+            # If skill name already starts with parent prefix, that's also valid
+            if actual_name != expected_nested_name and not actual_name.startswith(
+                f"{parent_name}-"
+            ):
+                errors.append(
+                    f"Nested skill name '{actual_name}' should be '{expected_nested_name}' or start with '{parent_name}-' (format: parent-skillname)"
+                )
     else:
+        # Standard skill: name must match directory
         if actual_name != expected_name:
             errors.append(
                 f"Skill name '{actual_name}' doesn't match directory '{expected_name}'"
