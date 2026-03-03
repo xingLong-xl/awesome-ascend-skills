@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 
-def parse_frontmatter(content: str) -> Tuple[Dict[str, str], str]:
+def parse_frontmatter(content: str) -> tuple[dict, str]:
     if not content.startswith("---"):
         return {}, content
 
@@ -26,7 +24,7 @@ def parse_frontmatter(content: str) -> Tuple[Dict[str, str], str]:
     return frontmatter, body
 
 
-def validate_skill_file(skill_path: Path) -> Tuple[List[str], List[str]]:
+def validate_skill_file(skill_path: Path, repo_root: Path) -> tuple[list, list]:
     errors = []
     warnings = []
 
@@ -34,14 +32,14 @@ def validate_skill_file(skill_path: Path) -> Tuple[List[str], List[str]]:
     frontmatter, body = parse_frontmatter(content)
 
     if "name" not in frontmatter:
-        errors.append(f"Missing 'name' field in frontmatter")
+        errors.append("Missing 'name' field in frontmatter")
     elif not frontmatter["name"]:
-        errors.append(f"Empty 'name' field in frontmatter")
+        errors.append("Empty 'name' field in frontmatter")
 
     if "description" not in frontmatter:
-        errors.append(f"Missing 'description' field in frontmatter")
+        errors.append("Missing 'description' field in frontmatter")
     elif not frontmatter["description"]:
-        errors.append(f"Empty 'description' field in frontmatter")
+        errors.append("Empty 'description' field in frontmatter")
     elif len(frontmatter["description"]) < 20:
         warnings.append(
             f"Description is too short ({len(frontmatter['description'])} chars) - may affect agent matching"
@@ -50,35 +48,28 @@ def validate_skill_file(skill_path: Path) -> Tuple[List[str], List[str]]:
     expected_name = skill_path.parent.name
     actual_name = frontmatter.get("name", "")
 
-    path_parts = skill_path.parts
+    rel_path = skill_path.relative_to(repo_root)
+    rel_parts = rel_path.parts
 
-    # Check if this is a nested skill (inside a 'skills/' directory, but not in .agents/)
-    is_nested_skill = "skills" in path_parts and ".agents" not in path_parts
+    is_in_agents = ".agents" in rel_parts
+    depth = len(rel_parts) - 1  # -1 for SKILL.md itself
+
+    is_nested_skill = depth > 1 and not is_in_agents
 
     if is_nested_skill:
-        # For nested skills, expected name format: {parent}-skillname
-        skills_index = path_parts.index("skills")
-        if skills_index > 0:
-            parent_name = path_parts[skills_index - 1]
-            skill_name = skill_path.parent.name
-            expected_nested_name = f"{parent_name}-{skill_name}"
-
-            # If skill name already starts with parent prefix, that's also valid
-            if actual_name != expected_nested_name and not actual_name.startswith(
-                f"{parent_name}-"
-            ):
-                errors.append(
-                    f"Nested skill name '{actual_name}' should be '{expected_nested_name}' or start with '{parent_name}-' (format: parent-skillname)"
-                )
+        folder_name = rel_parts[0]
+        if not actual_name.startswith(f"{folder_name}-"):
+            errors.append(
+                f"Nested skill name '{actual_name}' should start with '{folder_name}-' (format: folder-skillname)"
+            )
     else:
-        # Standard skill: name must match directory
         if actual_name != expected_name:
             errors.append(
                 f"Skill name '{actual_name}' doesn't match directory '{expected_name}'"
             )
 
     if "[TODO:" in body or "[TODO]" in body:
-        warnings.append(f"Contains TODO placeholder - should be completed before merge")
+        warnings.append("Contains TODO placeholder - should be completed before merge")
 
     if len(body.strip()) < 100:
         warnings.append(f"Body content is very short ({len(body.strip())} chars)")
@@ -102,7 +93,7 @@ def main():
 
     for skill_path in sorted(skill_files):
         rel_path = skill_path.relative_to(repo_root)
-        errors, warnings = validate_skill_file(skill_path)
+        errors, warnings = validate_skill_file(skill_path, repo_root)
 
         if errors or warnings:
             print(f"\n📄 {rel_path}")
