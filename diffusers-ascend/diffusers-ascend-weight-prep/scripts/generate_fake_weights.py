@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import shutil
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -157,8 +158,6 @@ def generate_from_local_metadata(
                 print(f"  Warning: unknown library '{library_name}', skipping")
         except Exception as e:
             print(f"  Error generating {comp_name}: {e}", file=sys.stderr)
-            import traceback
-
             traceback.print_exc()
             continue
 
