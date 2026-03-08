@@ -64,11 +64,11 @@ def run_benchmark(args):
         pipe = pipe.to(args.device)
         gen_device = args.device
 
-    if args.attention_slicing and hasattr(pipe, "enable_attention_slicing"):
+    if hasattr(pipe, "enable_attention_slicing") and args.attention_slicing:
         pipe.enable_attention_slicing()
-    if args.vae_slicing and hasattr(pipe, "enable_vae_slicing"):
+    if hasattr(pipe, "enable_vae_slicing") and args.vae_slicing:
         pipe.enable_vae_slicing()
-    if args.vae_tiling and hasattr(pipe, "enable_vae_tiling"):
+    if hasattr(pipe, "enable_vae_tiling") and args.vae_tiling:
         pipe.enable_vae_tiling()
 
     # Reset memory stats
