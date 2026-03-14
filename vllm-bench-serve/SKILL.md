@@ -53,6 +53,8 @@ keywords:
 - `vllm-ascend-server`: Deploy and manage vLLM inference services
 - `remote-server-guide`: SSH connection, remote server access, container management
 
+> When a benchmark command fails or returns unexpected results, read `references/troubleshooting.md` for common errors and solutions.
+
 ---
 
 ## 2. Trigger Examples
@@ -118,88 +120,68 @@ Before anything else, determine WHERE the benchmark client will run. The benchma
 
 ### Decision Tree
 
-1. **Can we access the target service from the current environment?**
-   - If user gave `ip:port`, try: `curl -s --connect-timeout 5 http://ip:port/health`
-   - If reachable → candidate for local execution
-   - If not reachable → need remote execution environment
-
-2. **Is `vllm bench serve` available here?**
-   - Run: `scripts/check_bench_env.sh` (or manually: `python3 -c "import vllm; print(vllm.__version__)"` then `vllm bench serve --help`)
-   - If available → proceed locally
-   - If not → need a different environment
-
-3. **If local execution is not viable:**
+1. **Service reachable?** — `curl -s --connect-timeout 5 http://ip:port/health`
+   - Reachable → candidate for local execution
+   - Not reachable → need remote execution environment
+2. **vllm available?** — `scripts/check_bench_env.sh` or `vllm bench serve --help`
+   - Available → proceed locally
+   - Not available → need a different environment
+3. **If local not viable** — 
    - Ask user where benchmark should run (remote server? container?)
    - Use `remote-server-guide` skill to establish connection
    - Once in the remote environment, re-run environment checks
    - All subsequent phases execute in that environment
-
-4. **Check writable directory** for result storage
+4. **Writable directory?** — test write access for result storage
    - Test: `touch /tmp/bench_test_write && rm /tmp/bench_test_write`
    - If not writable, ask user for an alternative result directory
 
 > **Remote/Container execution**: When benchmark runs remotely, construct `vllm bench serve` commands directly in the remote shell rather than transferring scripts. Read results via `cat`/`jq` in the remote session. See `references/environment-checks.md` for details.
+
+> Read `references/environment-checks.md` when: executing remotely or in containers, or environment checks fail.
+> Skip when: local environment checks all pass.
 
 ---
 
 ## 5. Phase 1 — Service & Model
 
 ### Service Address
-- If user provided `ip:port` or `base_url` → use it
+- If user provided `ip:port` → normalize to `http://ip:port`
 - If user only gave a model name → ask for the service address
-- Normalize to `base_url` format: `http://ip:port`
 
 ### Model Discovery
-Run the service probe (or manually: `curl -s http://ip:port/v1/models`):
 ```bash
-# Using the probe script (local execution):
 bash <skill-path>/scripts/probe_service.sh --base-url http://ip:port
-
-# Or manually:
-curl -s http://ip:port/v1/models | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-for m in d['data']:
-    print(f\"id={m['id']}  root={m['root']}\")
-"
 ```
+- One model → confirm with user
+- Multiple models → let user choose
+- No models → service may not be ready
 
-- If exactly one model → confirm with user
-- If multiple models → let user choose
-- If no models → service may not be ready, report error
-
-### Understanding `--model` vs `--served-model-name`
-
-These two parameters serve different purposes in `vllm bench serve`:
+### `--model` vs `--served-model-name`
 
 | Parameter | Purpose | Used For |
 |-----------|---------|----------|
-| `--model` | Model weight path / tokenizer identifier | Tokenizer initialization (needed for `random`, `random-mm`, `random-rerank` datasets that generate synthetic tokens) |
-| `--served-model-name` | The model name used in API requests | The `"model"` field in HTTP request bodies sent to the service |
+| `--model` | Model weight path / tokenizer identifier | Tokenizer initialization (needed for `random`, `random-mm`, `random-rerank` datasets) |
+| `--served-model-name` | API model name | The `"model"` field in HTTP request bodies |
 
-**How `vllm bench serve` resolves these internally:**
-- If `--model` is NOT specified: auto-fetches from `/v1/models` endpoint — `id` → `served_model_name`, `root` → `model` (weight path for tokenizer)
-- If `--model` IS specified: uses it for tokenizer. If `--served-model-name` is also given, uses that for API requests; otherwise falls back to using `--model` value as the API model name
+**How auto-fetch works:** When `--model` is omitted, `vllm bench serve` fetches from `/v1/models` — `id` → `served_model_name`, `root` → `model` (weight path for tokenizer).
 
-**When to use each:**
-- If the service is accessible and benchmark runs on the same network: **omit `--model`** to let auto-fetch handle both (simplest approach). Confirm with user that the auto-detected model is correct.
-- If auto-fetch is not available, or the `/v1/models` `root` field does not point to a valid tokenizer path:
-  - `--model` should be the weight path (e.g., `/path/to/Qwen3-30B-Instruct`) — ask the user for it
-  - `--served-model-name` should be the name the service recognizes (e.g., `qwen3-30b`) — can be read from `/v1/models` `id` field
-- For `--skip-tokenizer-init` scenarios (embedding/reranking backends): `--model` is less critical but `--served-model-name` must still match the service
+**Cross-environment concern:** The service and benchmark client often run on different machines (e.g., service on a remote NPU server, benchmark client on a local workstation). The `root` path returned by `/v1/models` is the server-side weight path and may not exist on the benchmark client. After auto-fetch:
+1. Check whether the `root` path exists on the benchmark client: `test -d <root_path>`
+2. If the path exists → use it as `--model`
+3. If the path does NOT exist → ask the user for a valid local tokenizer path or HuggingFace model ID (e.g., `Qwen/Qwen3-30B-Instruct`)
+4. For embedding/reranking backends with `--skip-tokenizer-init`, the `--model` path is less critical
 
 **Always confirm with the user** which model identifier to use, especially when the weight path and served name differ.
 
+> Read `references/param-reference.md` "Model" section when: auto-fetch fails, `/v1/models` root path is inaccessible, or weight path and served name differ.
+> Skip when: auto-fetch works, path verified on benchmark client, and user confirms the detected model.
+
 ### Output of This Phase
-- `base_url`: confirmed service URL
-- `model`: weight path / tokenizer identifier (for `--model`)
-- `served_model_name`: API model name (for `--served-model-name`), may be the same as `model`
+- `base_url`, `model` (weight path), `served_model_name` (API name)
 
 ---
 
 ## 6. Phase 2 — Mode Selection
-
-Determine the benchmark mode from user intent:
 
 | User Intent | Mode | Description |
 |-------------|------|-------------|
@@ -207,13 +189,14 @@ Determine the benchmark mode from user intent:
 | "多个并发/参数/服务对比" | **Batch** | Multiple cases, aggregate comparison table |
 | "找最优并发/吞吐" / "寻优" | **Auto-Optimize** | Iterative search for optimal configuration |
 
-If ambiguous, ask the user which mode they need. Explain the three options briefly.
+If ambiguous, ask the user which mode they need. 
+**Always check the test mode with the user**, **DO NOT** decide it yourselves.
 
 ---
 
 ## 7. Phase 3 — Backend Selection
 
-The backend determines the request format. **You must also set `--endpoint` to the matching API path** — `vllm bench serve` defaults `--endpoint` to `/v1/completions`, which is only correct for `openai` and `vllm` backends. All other backends will fail without the correct `--endpoint`.
+The backend determines the request format. **`--endpoint` must match the backend** — `vllm bench serve` defaults `--endpoint` to `/v1/completions`, which is only correct for `openai`/`vllm`. All other backends will fail without the correct `--endpoint`.
 
 | Model Type | Recommended Backend | Required `--endpoint` |
 |------------|-------------------|-----------------------|
@@ -224,57 +207,48 @@ The backend determines the request format. **You must also set `--endpoint` to t
 | Reranking | `vllm-rerank` | `/v1/rerank` |
 | Audio/ASR | `openai-audio` | `/v1/audio/transcriptions` |
 
-For most LLM benchmarks, **`openai-chat` is the recommended default** because it matches real production usage patterns.
+Default to `openai-chat` for text LLMs. The scripts (`generate_bench_cmd.py`, `auto_optimize.py`) auto-inject the correct endpoint, but when constructing commands manually, always include `--endpoint`.
+> **CRITICAL**: When using `--backend openai-chat`, you MUST also pass `--endpoint /v1/chat/completions`. Without it, the benchmark will fail with a URL validation error. 
 
-> **CRITICAL**: When using `--backend openai-chat`, you MUST also pass `--endpoint /v1/chat/completions`. Without it, the benchmark will fail with a URL validation error. The `scripts/generate_bench_cmd.py` and `scripts/auto_optimize.py` auto-inject the correct endpoint, but when constructing commands manually, always include `--endpoint`.
-
-Present the options to the user with short explanations. If the user doesn't have a preference, use `openai-chat` for text LLMs.
-
-> For the full backend list including `openai-embeddings-chat`, `openai-embeddings-clip`, `openai-embeddings-vlm2vec`, `infinity-embeddings`, `infinity-embeddings-clip`, `vllm-pooling`, see `references/backend-mapping.md`.
+> Read `references/backend-mapping.md` when: user needs embedding/reranking/audio backends, or uncommon backends like `openai-embeddings-clip`, `vllm-pooling`.
+> Skip when: using `openai-chat` (default) — the table above is sufficient.
 
 ---
 
 ## 8. Phase 4 — Dataset Selection
 
-Use a **two-step interaction**: first select the dataset category, then confirm specific parameters.
+**Two-step interaction**: select category, then confirm parameters.
 
-### Step 1: Dataset Category
+### Dataset Categories
 
 | Scenario | Dataset | Key Parameters |
 |----------|---------|---------------|
 | Quick synthetic test | `random` | `--random-input-len`, `--random-output-len` |
-| Random length range | `random` | + `--random-range-ratio` (0~1, e.g. 0.5 = ±50%) |
+| Random length range | `random` | + `--random-range-ratio` (0~1) |
 | Prefix cache test | `random` + `--random-prefix-len` | or `prefix_repetition` |
-| Real conversation distribution | `sharegpt` | `--dataset-path` (auto-downloads if not local) |
+| Real conversation | `sharegpt` | `--dataset-path` (auto-downloads if omitted) |
 | Burst traffic simulation | `burstgpt` | `--dataset-path` |
-| Custom workload (JSONL) | `custom` | `--dataset-path` (JSONL with "prompt" field) |
-| Multimodal (images) | `random-mm` or `custom_mm` | MM-specific params |
-| Embedding benchmark | `random` | with embedding backend, `--random-batch-size` |
-| Reranking benchmark | `random-rerank` | must use `vllm-rerank` backend |
+| Custom workload | `custom` | `--dataset-path` (JSONL with "prompt" field) |
+| Multimodal | `random-mm` or `custom_mm` | MM-specific params |
+| Embedding | `random` | with embedding backend, `--random-batch-size` |
+| Reranking | `random-rerank` | must use `vllm-rerank` backend |
 | HuggingFace dataset | `hf` | `--dataset-path HF_ID`, `--hf-split`, `--hf-subset` |
 | Speculative decoding test | `spec_bench` | `--spec-bench-category` |
 
-### Step 2: Dataset-Specific Parameters
+### Common Dataset Parameters
 
-After the user selects a category, confirm the specific parameters. Different datasets need different parameters — do not assume a universal template.
+**`random`** (most common):
+- `--random-input-len` (default 1024), `--random-output-len` (default 128)
+- `--random-range-ratio` (default 0.0), `--random-prefix-len` (default 0)
 
-**For `random` dataset** (most common for quick benchmarks):
-- `--random-input-len` (default 1024): input token count
-- `--random-output-len` (default 128): output token count
-- `--random-range-ratio` (default 0.0): length randomization range, 0=fixed, 0.5=±50%
-- `--random-prefix-len` (default 0): fixed prefix length for prefix cache testing
+**`sharegpt`**: `--dataset-path`, `--sharegpt-output-len`
 
-> Note: `--input-len` and `--output-len` are convenience aliases that map to dataset-specific parameters (e.g., `--random-input-len`, `--sonnet-input-len`). Prefer using dataset-specific parameter names to be explicit.
+**`custom`**: `--dataset-path` (JSONL), `--custom-output-len` (default 256)
 
-**For `sharegpt` dataset**:
-- `--dataset-path`: path to ShareGPT JSON file (will auto-download from HuggingFace if not provided)
-- `--sharegpt-output-len`: optional output length override
+> Note: `--input-len` and `--output-len` are convenience aliases that map to dataset-specific parameters (e.g., `--random-input-len`). Prefer using dataset-specific names to be explicit.
 
-**For `custom` dataset**:
-- `--dataset-path`: path to JSONL file, each line must have `"prompt"` field, optional `"output_tokens"`
-- `--custom-output-len` (default 256): output length if not in data
-
-> For the complete dataset compatibility matrix and all dataset-specific parameters, see `references/dataset-guide.md`.
+> Read `references/dataset-guide.md` when: using `hf`, `custom_mm`, `prefix_repetition`, `spec_bench`, or other uncommon datasets.
+> Skip when: using `random` or `sharegpt` — the parameters above are complete.
 
 ---
 
@@ -285,20 +259,16 @@ After the user selects a category, confirm the specific parameters. Different da
 **Load Control** (choose one approach):
 - `--max-concurrency N`: limit concurrent requests (recommended for most tests)
 - `--request-rate R`: requests per second, Poisson arrival (default: inf = all at once)
-- These can also be combined (e.g., fixed rate with concurrency cap)
-- For auto-optimize mode, the search dimension determines which to vary
+- Can be combined (fixed rate with concurrency cap)
 
-**Request Count:**
-- `--num-prompts N` (default 1000): total requests to send
+**Request Count:** `--num-prompts N` (default 1000): total requests to send
 - For auto-optimize, this is calculated as `search_value × multiplier` (see Phase 8)
 
-**Warmup:**
-- `--num-warmups N` (default 0): warmup requests before measurement
-- Recommend 3-10 for graph-mode compiled services
+**Warmup:** `--num-warmups N`: warmup requests before measurement (default 0, recommend 3-10 for graph-mode)
 
 ### SLO & Metrics (for auto-optimize or SLO-aware benchmarks)
 
-- `--goodput "METRIC:VALUE_MS"`: SLO targets, e.g. `--goodput "ttft:500" --goodput "tpot:50"`
+- `--goodput "METRIC:VALUE_MS"`: SLO targets (e.g., `--goodput "ttft:500"`)
   - Valid metrics: `ttft`, `tpot`, `e2el` (values in milliseconds)
 - `--percentile-metrics "ttft,tpot,itl,e2el"`: which metrics to report percentiles for
 - `--metric-percentiles "50,90,95,99"`: which percentiles to compute
@@ -306,24 +276,23 @@ After the user selects a category, confirm the specific parameters. Different da
 ### Sampling Parameters (usually defaults are fine)
 - `--temperature`, `--top-p`, `--top-k`, etc.
 - Only effective with OpenAI-compatible backends (`openai`, `openai-chat`, `vllm`)
-- Typically leave at defaults unless user has specific requirements
 
-> For the exhaustive parameter list, see `references/param-reference.md`.
+> Read `references/param-reference.md` when: user needs sampling parameters, ramp-up strategy, burstiness, or other advanced options.
+> Skip when: only using `--max-concurrency` + `--num-prompts` — the above covers it.
 
 ---
 
 ## 10. Phase 6 — Parameter Validation
 
-Before executing, validate parameter compatibility. Use `scripts/validate_params.py` (local) or check manually:
+Before executing, validate with `scripts/validate_params.py` or check manually:
 
 **Critical rules:**
-1. **`--endpoint` must match the backend** — e.g., `openai-chat` requires `--endpoint /v1/chat/completions`. Only `openai`/`vllm` can use the default `/v1/completions`. The scripts auto-inject this, but verify when constructing commands manually.
-2. `random-rerank` dataset MUST use `vllm-rerank` backend
-3. Multimodal datasets (`random-mm`, `custom_mm`) require `openai-chat` backend
-4. `sharegpt`/`custom`/`custom_mm` require `--dataset-path`
-5. `--request-rate` and `--max-concurrency` CAN be combined, but understand the interaction
-6. `--goodput` metric names must be `ttft`, `tpot`, or `e2el`
-7. If `--num-prompts` < 100, warn about insufficient statistical significance for P99
+1. **`--endpoint` must match `--backend`** — e.g., `openai-chat` requires `/v1/chat/completions`. Only `openai`/`vllm` can use the default `/v1/completions`. Scripts auto-inject this, but verify when constructing commands manually.
+2. `random-rerank` → must use `vllm-rerank` backend
+3. `random-mm` / `custom_mm` → require `openai-chat`
+4. `sharegpt`/`custom`/`custom_mm` → require `--dataset-path`
+5. `--goodput` metrics must be `ttft`, `tpot`, or `e2el`
+6. `--num-prompts` < 100 → warn about P99 significance
 
 If validation fails, explain the issue to the user and suggest corrections. Do not proceed until all errors are resolved.
 
@@ -333,10 +302,7 @@ If validation fails, explain the issue to the user and suggest corrections. Do n
 
 ### Result Archival (ALWAYS applied)
 
-Every `vllm bench serve` command MUST include these flags:
-```
---save-result --save-detailed --result-dir <dir> --result-filename <name>
-```
+Every command MUST include: `--save-result --save-detailed --result-dir <dir> --result-filename <name>`
 
 **Naming convention:**
 ```
@@ -350,78 +316,58 @@ bench_results/
 ├── single/        # Single runs
 ├── batch/         # Batch sessions (subdirectory per batch)
 │   └── batch_YYYYMMDD_HHMMSS/
-├── optimize/      # Auto-optimize sessions (subdirectory per session)
+├── optimize/      # Auto-optimize sessions
 │   └── opt_YYYYMMDD_HHMMSS/
 └── logs/          # Execution logs
 ```
 
-### Single Execution
+### Command Generation
 
+Use `scripts/generate_bench_cmd.py` to auto-generate commands with correct `--endpoint` and archival flags:
 ```bash
-# Generate command (local) — auto-injects correct --endpoint:
 python3 <skill-path>/scripts/generate_bench_cmd.py \
-  --base-url http://ip:port --model /path/to/weights --served-model-name MODEL_NAME \
-  --backend openai-chat \
+  --base-url http://ip:port --backend openai-chat \
   --dataset-name random --random-input-len 1024 --random-output-len 128 \
   --max-concurrency 8 --num-prompts 500
-
-# Execute:
-bash <skill-path>/scripts/run_bench.sh "<generated_command>"
 ```
 
-Or construct the command directly (**note `--endpoint` is required**):
+Or construct manually (**`--endpoint` is required when not using scripts**):
 ```bash
 vllm bench serve \
-  --base-url http://ip:port --model /path/to/weights --served-model-name MODEL_NAME \
-  --backend openai-chat --endpoint /v1/chat/completions \
+  --base-url http://ip:port --backend openai-chat --endpoint /v1/chat/completions \
   --dataset-name random --random-input-len 1024 --random-output-len 128 \
   --max-concurrency 8 --num-prompts 500 \
   --percentile-metrics "ttft,tpot,itl,e2el" --metric-percentiles "50,90,95,99" \
-  --save-result --save-detailed \
-  --result-dir ./bench_results/single \
+  --save-result --save-detailed --result-dir ./bench_results/single \
   --result-filename bench_MODEL_random_openai-chat_TIMESTAMP.json
 ```
 
-> Note: If `--model` is omitted, `vllm bench serve` auto-fetches both the weight path and served name from the service's `/v1/models` endpoint. This is the simplest approach when the service is accessible. See Phase 1 for details on `--model` vs `--served-model-name`.
+### Execution
 
-### Batch Execution
+- **Single**: `bash <skill-path>/scripts/run_bench.sh "<command>" [--timeout SECONDS]`
+- **Batch**: `bash <skill-path>/scripts/run_batch.sh --config batch.jsonl --result-dir DIR --common-args "..." [--timeout S] [--parallel N]`
+- **Aggregate**: `python3 <skill-path>/scripts/aggregate_results.py --result-dir DIR --format markdown`
 
-For each case in the batch, generate and execute sequentially. Track pass/fail per case. After all cases complete, aggregate results.
-
-```bash
-# Using batch script (local):
-bash <skill-path>/scripts/run_batch.sh \
-  --config batch_cases.jsonl \
-  --result-dir ./bench_results/batch/batch_TIMESTAMP \
-  --common-args "--base-url http://ip:port --model /path/to/weights --served-model-name MODEL_NAME --backend openai-chat --endpoint /v1/chat/completions --dataset-name random --random-input-len 1024 --random-output-len 128"
-```
-
-### Error Handling
-- If a benchmark command fails (non-zero exit), capture stderr and log
-- In batch mode, continue with remaining cases; mark failed cases in summary
-- If service becomes unreachable mid-benchmark, probe health before retrying
-- Set reasonable timeout for each benchmark run
+Error handling: failed cases are logged; batch mode continues remaining cases.
 
 ### Remote Execution
 When running in a remote/container environment (determined in Phase 0):
 - Construct commands directly in the remote shell
-- Set `--result-dir` to a writable path in the remote environment (e.g., `/tmp/bench_results/`)
-- After completion, read results via `cat` / `jq` in the remote session
-- If user needs files locally, transfer via `scp` / `docker cp`
+- Set `--result-dir` to a writable path (e.g., `/tmp/bench_results/`)
+- Read results via `cat`/`jq` in the remote session
+- Transfer files locally via `scp`/`docker cp` if needed
+
+> Read `references/scenario-cookbook.md` when: constructing commands manually, or need copy-paste examples for specific scenarios (multimodal, embedding, prefix cache, stress test).
+> Skip when: using `generate_bench_cmd.py` to build commands.
 
 ---
 
 ## 12. Phase 8 — Auto-Optimize
 
-Auto-optimization finds the maximum throughput or concurrency that satisfies user-defined SLO constraints.
+Finds the maximum concurrency/rate satisfying SLO constraints.
 
 ### Prerequisites
-The user MUST provide at least one SLO constraint. If none given, ask:
-- "What is your TTFT P99 target? (e.g., 500ms)"
-- "What is your TPOT P99 target? (e.g., 50ms)"
-- "What is your minimum acceptable success rate? (e.g., 95%)"
-
-Do NOT define "optimal" on behalf of the user without explicit constraints.
+User MUST provide at least one SLO constraint (TTFT P99, TPOT P99, E2E P99, or success rate). Do NOT define "optimal" without explicit constraints.
 
 ### Search Modes
 
@@ -429,30 +375,27 @@ Do NOT define "optimal" on behalf of the user without explicit constraints.
 |------|----------------|---------------|----------|
 | A | `--max-concurrency` | (no `--request-rate`) | **Yes** |
 | B | `--request-rate` | (no `--max-concurrency`) | |
-| C | `--request-rate` | `--max-concurrency` (user-specified) | |
-| D | `--max-concurrency` | `--request-rate` (user-specified) | |
+| C | `--request-rate` | `--max-concurrency` (user-set) | |
+| D | `--max-concurrency` | `--request-rate` (user-set) | |
 | E | Both (two-stage) | — | |
 
 Confirm the search mode with the user. Default to Mode A if not specified.
 
 ### num_prompts Multiplier
 
-The number of requests per iteration: `num_prompts = max(search_value × multiplier, minimum_floor)`. The floor ensures enough samples even at low search values.
+`num_prompts = max(search_value × multiplier, minimum_floor)`
 
 | Phase | Multiplier | Min Floor | Purpose |
 |-------|-----------|-----------|---------|
-| Coarse probe (Phase 2) | 2~4× | 50 | Speed priority |
-| Fine search (Phase 3) | 5~8× | 100 | Accuracy priority |
-| Validation (Phase 4) | 8~10× | 200 | Confidence priority |
+| Coarse probe | 2~4× | 32 | Speed priority |
+| Fine search | 5~8× | 64 | Accuracy priority |
+| Validation | 8~10× | 128 | Confidence priority |
 
 Confirm multiplier preference with user before starting. Use defaults if no preference.
 
-### Algorithm (4 Phases)
+### Algorithm Summary
 
-See `references/optimization-strategy.md` for the complete algorithm. Summary:
-
-1. **Warmup**: Run at minimal load (concurrency=1, 50 prompts, num_warmups=5). If SLO already fails → abort with "service cannot meet SLO at minimum load".
-
+1. **Warmup**: Run at minimal load (concurrency=1, 10 prompts, num_warmups=5). If SLO already fails → abort with "service cannot meet SLO at minimum load".
 2. **Exponential Probe**: Double the search variable each iteration (1→2→4→8→16...) until SLO is violated. This finds the upper bound.
 
 3. **Binary Search**: Search between last-good and first-bad values. Converge when `(upper - lower) / lower < 5%` or max 8 iterations.
@@ -472,54 +415,40 @@ success_rate >= slo_success_rate  (default 95%)
 - **Service never saturates** (probe reaches very high values): Report maximum tested point
 - **Unstable metrics** (>20% variance between runs): Increase `num_prompts` multiplier
 
-### Result Archival for Auto-Optimize
+### Result Archival
 Every iteration is saved individually:
 ```
 bench_results/optimize/opt_TIMESTAMP/
 ├── warmup.json
-├── probe_001_c1.json
-├── probe_002_c2.json
-├── probe_003_c4.json
-├── ...
-├── search_001_c12.json
-├── search_002_c10.json
-├── ...
+├── probe_001_c1.json, probe_002_c2.json, ...
+├── search_001_c12.json, search_002_c10.json, ...
 ├── validation.json
 └── optimization_report.json   # Final summary
 ```
+
+Execute via: `python3 <skill-path>/scripts/auto_optimize.py --base-url ... --slo-ttft-p99 500 --search-mode A`
+
+> Read `references/optimization-strategy.md` when: need algorithm details, adjusting convergence thresholds, handling edge cases (service saturated at minimum load, unstable metrics, two-stage Mode E search).
+> Skip when: running `auto_optimize.py` with default parameters — the summary above is sufficient.
 
 ---
 
 ## 13. Results & Output
 
 ### Default Output Format: Comparison Table + Recommendation
-
-For every benchmark run (single, batch, or auto-optimize), present results as:
+For every benchmark run, present:
 
 **Comparison Table** (Markdown):
 ```
-| Case | Concurrency | Rate | Prompts | Req/s | Out tok/s | TTFT mean | TTFT P99 | TPOT mean | TPOT P99 | E2E P99 | Success% | SLO? |
-|------|------------|------|---------|-------|-----------|-----------|----------|-----------|----------|---------|----------|------|
-| ...  | ...        | ...  | ...     | ...   | ...       | ...       | ...      | ...       | ...      | ...     | ...      | ...  |
+| Case | Concurrency | Rate | Prompts | Req/s | Out tok/s | TTFT mean | TTFT P99 | TPOT mean | TPOT P99 | E2E P99 | Success% |
 ```
 
-**Recommendation** (after the table):
-- For single: summary of key metrics, any concerns
-- For batch: which configuration performed best and why
-- For auto-optimize: the optimal point, SLO compliance evidence, search history summary
+**Recommendation**:
+- Single → key metrics summary, concerns
+- Batch → best configuration and why
+- Auto-optimize → optimal point, SLO evidence, search history
 
-### Additional Output (on request)
-- Raw `vllm bench serve` commands used
-- Paths to result JSON files
-- Short test report (using `assets/report_template.md`)
-- Per-request detailed data analysis
-
-### Aggregation Script (local execution)
-```bash
-python3 <skill-path>/scripts/aggregate_results.py \
-  --result-dir ./bench_results/batch/batch_TIMESTAMP \
-  --format markdown
-```
+**Additional** (on request): raw commands, result file paths, report (using `assets/report_template.md`).
 
 ---
 
@@ -533,10 +462,10 @@ python3 <skill-path>/scripts/aggregate_results.py \
 | `scripts/probe_service.sh` | Probe running service: health, models, backends |
 | `scripts/validate_params.py` | Validate parameter combinations before execution |
 | `scripts/generate_bench_cmd.py` | Generate complete benchmark command with archival flags |
-| `scripts/run_bench.sh` | Execute single benchmark with error handling |
-| `scripts/run_batch.sh` | Execute batch of benchmark cases sequentially |
-| `scripts/aggregate_results.py` | Aggregate result JSONs into comparison table |
-| `scripts/auto_optimize.py` | Auto-optimization driver (probe + binary search) |
+| `scripts/run_bench.sh` | Execute single benchmark with error handling and timeout |
+| `scripts/run_batch.sh` | Execute batch of cases (sequential or parallel) |
+| `scripts/aggregate_results.py` | Aggregate result JSONs into comparison table (with optional baseline regression detection) |
+| `scripts/auto_optimize.py` | Auto-optimization driver (exponential probe + binary search) |
 
 ### References
 
@@ -545,7 +474,7 @@ python3 <skill-path>/scripts/aggregate_results.py \
 | `references/param-reference.md` | Complete `vllm bench serve` CLI parameter mapping |
 | `references/dataset-guide.md` | Dataset types, parameters, backend compatibility matrix |
 | `references/backend-mapping.md` | Backend → endpoint → model type mapping |
-| `references/scenario-cookbook.md` | 10 ready-to-use benchmark scenario examples |
+| `references/scenario-cookbook.md` | Ready-to-use benchmark scenario examples |
 | `references/optimization-strategy.md` | Auto-optimization algorithm in full detail |
 | `references/environment-checks.md` | Execution environment prerequisites and checks |
-| `references/troubleshooting.md` | Common errors and solutions (endpoint mismatch, tokenizer failures, etc.) |
+| `references/troubleshooting.md` | Common errors and solutions |
