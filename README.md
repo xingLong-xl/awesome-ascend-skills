@@ -92,6 +92,7 @@ cp -r awesome-ascend-skills/npu-smi your-project/.agents/skills/
 | [ascend-opplugin](ascend-opplugin/SKILL.md) | 开发 | op-plugin 环境安装与 torch_npu 自定义算子接入：无 workspace / workspace+tiling 两种模式，从内核实现到 host 注册、构建与测试 |
 | [diffusers-ascend-weight-prep](diffusers-ascend/diffusers-ascend-weight-prep/SKILL.md) | 开发 | Diffusers 权重准备：HuggingFace/ModelScope 模型下载、基于 config.json 生成假权重用于验证 |
 | [diffusers-ascend-pipeline](diffusers-ascend/diffusers-ascend-pipeline/SKILL.md) | 开发 | Diffusers Pipeline 推理：环境预检、通用推理（图像/视频）、内存优化、LoRA 集成 |
+| [remote-server-guide](remote-server-guide/SKILL.md) | 运维 | 远程服务器连接指南：SSH 多认证方式、Docker 容器管理、文件传输、故障排查 |
 
 ---
 
