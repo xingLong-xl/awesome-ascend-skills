@@ -408,9 +408,9 @@ Confirm the search mode with the user. Default to Mode A if not specified.
 
 | Phase | Multiplier | Min Floor | Purpose |
 |-------|-----------|-----------|---------|
-| Coarse probe | 2~4× | 32 | Speed priority |
-| Fine search | 5~8× | 64 | Accuracy priority |
-| Validation | 8~10× | 128 | Confidence priority |
+| Coarse probe | 2~4× | 16 | Speed priority |
+| Fine search | 5~8× | 48 | Accuracy priority |
+| Validation | 8~10× | 96 | Confidence priority |
 
 Confirm multiplier preference with user before starting. Use defaults if no preference.
 

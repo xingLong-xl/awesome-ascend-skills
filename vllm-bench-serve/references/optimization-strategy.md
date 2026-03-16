@@ -254,12 +254,12 @@ def check_slo(results, slo_targets):
     "failed": 0
   },
   "exploration_history": [
-    {"phase": "warmup", "value": 1, "num_prompts": 50, "slo_pass": true, "file": "warmup.json"},
-    {"phase": "probe", "value": 1, "num_prompts": 50, "slo_pass": true, "file": "probe_001_m1.json"},
-    {"phase": "probe", "value": 2, "num_prompts": 50, "slo_pass": true, "file": "probe_002_m2.json"},
-    {"phase": "probe", "value": 4, "num_prompts": 50, "slo_pass": true, "file": "probe_003_m4.json"},
-    {"phase": "probe", "value": 8, "num_prompts": 50, "slo_pass": true, "file": "probe_004_m8.json"},
-    {"phase": "probe", "value": 16, "num_prompts": 50, "slo_pass": true, "file": "probe_005_m16.json"},
+    {"phase": "warmup", "value": 1, "num_prompts": 16, "slo_pass": true, "file": "warmup.json"},
+    {"phase": "probe", "value": 1, "num_prompts": 16, "slo_pass": true, "file": "probe_001_m1.json"},
+    {"phase": "probe", "value": 2, "num_prompts": 16, "slo_pass": true, "file": "probe_002_m2.json"},
+    {"phase": "probe", "value": 4, "num_prompts": 16, "slo_pass": true, "file": "probe_003_m4.json"},
+    {"phase": "probe", "value": 8, "num_prompts": 24, "slo_pass": true, "file": "probe_004_m8.json"},
+    {"phase": "probe", "value": 16, "num_prompts": 48, "slo_pass": true, "file": "probe_005_m16.json"},
     {"phase": "probe", "value": 32, "num_prompts": 96, "slo_pass": false, "file": "probe_006_m32.json"},
     {"phase": "search", "value": 24, "num_prompts": 144, "slo_pass": true, "file": "search_001_m24.json"},
     {"phase": "search", "value": 28, "num_prompts": 168, "slo_pass": false, "file": "search_002_m28.json"},
