@@ -39,3 +39,5 @@ venv/
 
 # Agent
 .sisyphus
+# Git worktrees
+.worktrees/
