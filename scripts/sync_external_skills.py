@@ -8,7 +8,7 @@ import tempfile
 import yaml
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 script_dir = Path(__file__).parent
 project_root = script_dir.parent
@@ -252,19 +252,92 @@ def get_synced_skills() -> Set[str]:
     return skills
 
 
+def load_existing_external_skills(
+    sources: Iterable[ExternalSource], external_root: Union[Path, str] = "external"
+) -> Dict[Tuple[str, str], Tuple[Skill, str]]:
+    external_dir = Path(external_root)
+    existing_skills: Dict[Tuple[str, str], Tuple[Skill, str]] = {}
+    source_map = {source.name: source for source in sources if source.enabled}
+
+    if not external_dir.exists():
+        return existing_skills
+
+    for source_name, source in source_map.items():
+        source_dir = external_dir / source_name
+        if not source_dir.exists() or not source_dir.is_dir():
+            continue
+
+        for skill_dir in source_dir.iterdir():
+            if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").exists():
+                continue
+
+            parsed = parse_skill_md(skill_dir)
+            commit_sha = str(parsed.get("synced-commit", ""))
+            source_url = str(parsed.get("synced-from", source.url))
+            existing_skills[(source_name, skill_dir.name)] = (
+                Skill(
+                    name=skill_dir.name,
+                    path=skill_dir,
+                    source=ExternalSource(
+                        name=source.name,
+                        url=source_url,
+                        branch=source.branch,
+                        enabled=source.enabled,
+                        skills_path=source.skills_path,
+                    ),
+                    has_skill_md=True,
+                ),
+                commit_sha,
+            )
+
+    return existing_skills
+
+
+def build_synced_skill_index(
+    synced_skills: Dict[Tuple[str, str], Tuple[Skill, str]]
+) -> Dict[str, Set[str]]:
+    index: Dict[str, Set[str]] = {}
+    for source_name, skill_name in synced_skills.keys():
+        index.setdefault(skill_name, set()).add(source_name)
+    return index
+
+
+def prune_removed_source_skills(
+    existing_skills: Dict[Tuple[str, str], Tuple[Skill, str]],
+    source: ExternalSource,
+    current_skill_names: Set[str],
+) -> None:
+    source_root = Path("external") / source.name
+    removed_keys = [
+        key
+        for key in existing_skills
+        if key[0] == source.name and key[1] not in current_skill_names
+    ]
+
+    for key in removed_keys:
+        skill_path = source_root / key[1]
+        if skill_path.exists():
+            shutil.rmtree(skill_path)
+        del existing_skills[key]
+
+    if source_root.exists() and not any(source_root.iterdir()):
+        source_root.rmdir()
+
+
 def detect_conflicts(
-    skill: Skill, local_skills: Set[str], synced_skills: Set[str]
+    skill: Skill, local_skills: Set[str], synced_skills: Dict[str, Set[str]]
 ) -> Optional[ConflictInfo]:
     """Check if skill conflicts with local or synced skills."""
     if skill.name in local_skills:
         return ConflictInfo(
             skill_name=skill.name, local_path=f"./{skill.name}", external_source="local"
         )
-    if skill.name in synced_skills:
+    conflict_sources = synced_skills.get(skill.name, set()) - {skill.source.name}
+    if conflict_sources:
         return ConflictInfo(
             skill_name=skill.name,
             local_path=f"./external/*/{skill.name}",
-            external_source="synced",
+            external_source=f"synced ({', '.join(sorted(conflict_sources))})",
         )
     return None
 
@@ -449,6 +522,8 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
             - errors: Number of errors encountered
     """
     sources = load_config(config_path)
+    existing_external_skills = load_existing_external_skills(sources)
+    local_skills = get_local_skills()
 
     all_synced_skills = []  # List of (Skill, commit_sha) tuples
     all_skipped = []
@@ -468,11 +543,12 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
 
             skills = find_skills(repo_path, source)
             print(f"  Found {len(skills)} skills")
+            current_skill_names = {skill.name for skill in skills}
+            prune_removed_source_skills(existing_external_skills, source, current_skill_names)
 
-            local_skills = get_local_skills()
-            synced_skills = get_synced_skills()
+            synced_skills = build_synced_skill_index(existing_external_skills)
             print(f"  Local skills: {len(local_skills)}")
-            print(f"  Already synced: {len(synced_skills)}")
+            print(f"  Already synced: {len(existing_external_skills)}")
 
             for skill in skills:
                 conflict = detect_conflicts(skill, local_skills, synced_skills)
@@ -497,6 +573,10 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
                             has_skill_md=True,
                         )
                         all_synced_skills.append((synced_skill, commit_sha))
+                        existing_external_skills[(skill.source.name, skill.name)] = (
+                            synced_skill,
+                            commit_sha,
+                        )
                     else:
                         print(f"  ❌ Validation failed for {skill.name}")
                         all_errors.append((skill.name, "Validation failed"))
@@ -512,11 +592,15 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
             all_errors.append((source.name, str(e)))
 
     # Update marketplace.json and README.md with synced skills
-    if all_synced_skills:
-        print("\nUpdating marketplace.json...")
-        update_marketplace(all_synced_skills)
-        print("\nUpdating README.md...")
-        update_readme(all_synced_skills)
+    merged_synced_skills = sorted(
+        existing_external_skills.values(),
+        key=lambda item: (item[0].source.name, item[0].name),
+    )
+
+    print("\nUpdating marketplace.json...")
+    update_marketplace(merged_synced_skills)
+    print("\nUpdating README.md...")
+    update_readme(merged_synced_skills)
 
     # Return summary statistics
     results = {
@@ -659,11 +743,11 @@ def update_marketplace(
     for skill, commit_sha in synced_skills:
         skills_by_source[skill.source.name].append((skill, commit_sha))
 
-    # Remove existing external entries for these sources
-    external_group_names = {
-        f"external-{name}-skills" for name in skills_by_source.keys()
-    }
-    plugins = [p for p in plugins if p.get("name") not in external_group_names]
+    plugins = [
+        p
+        for p in plugins
+        if not (isinstance(p, dict) and p.get("external") is True)
+    ]
 
     # Create grouped entries for each source
     for source_name, skills_list in skills_by_source.items():
